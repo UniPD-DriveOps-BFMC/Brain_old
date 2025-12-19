@@ -302,3 +302,10 @@ class StateChange(Enum):
     msgType = "str"
 
 ### It will have this format: {"WarningName":"name1", "WarningID": 1}
+############################### Custom ###############################################
+class ObstacleInfo:
+    def __init__(self, left=0, center=0, right=0):
+        self.left = left
+        self.center = center
+        self.right = right
+

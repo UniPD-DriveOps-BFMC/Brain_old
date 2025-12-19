@@ -39,6 +39,7 @@ from src.utils.messages.allMessages import (
     Record,
     Brightness,
     Contrast,
+    ObstacleInfo,
 )
 from src.utils.messages.messageHandlerSender import messageHandlerSender
 from src.utils.messages.messageHandlerSubscriber import messageHandlerSubscriber
@@ -128,6 +129,33 @@ class threadCamera(ThreadWithStop):
                 self.video_writer.write(mainRequest) # type: ignore
 
             serialRequest = cv2.cvtColor(serialRequest, cv2.COLOR_YUV2BGR_I420) # type: ignore
+            
+            L, C, R = self.compute_obstacle(serialRequest)
+
+            # ===== TEMP DEBUG =====
+            if self.debugger:
+                debug = serialRequest.copy()
+                h, w, _ = debug.shape
+
+                cv2.line(debug, (w // 3, 0), (w // 3, h), (0, 255, 0), 1)
+                cv2.line(debug, (2 * w // 3, 0), (2 * w // 3, h), (0, 255, 0), 1)
+
+                cv2.putText(debug, f"L:{L}", (10, 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
+                cv2.putText(debug, f"C:{C}", (w//3 + 10, 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
+                cv2.putText(debug, f"R:{R}", (2*w//3 + 10, 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
+
+                cv2.imshow("Obstacle Debug", debug)
+                cv2.waitKey(1)
+            # ===== END TEMP DEBUG =====
+
+            if not self._blocker.is_set():
+                self.obstacleSender.send(
+                    ObstacleInfo(left=L, center=C, right=R)
+                )
+
 
             _, mainEncodedImg = cv2.imencode(".jpg", mainRequest) # type: ignore
             _, serialEncodedImg = cv2.imencode(".jpg", serialRequest) # type: ignore
@@ -214,3 +242,23 @@ class threadCamera(ThreadWithStop):
                 }
             )
         threading.Timer(1, self.configs).start()
+      # ============================= Custom ================================================  
+    def compute_obstacle(self, frame):
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+
+        h, w = blur.shape
+        roi = blur[int(0.6 * h):h, :]   # bottom 40%
+
+        edges = cv2.Canny(roi, 50, 150)
+
+        third = w // 3
+        left   = edges[:, :third]
+        center = edges[:, third:2*third]
+        right  = edges[:, 2*third:]
+
+        L = int(left.sum())
+        C = int(center.sum())
+        R = int(right.sum())
+
+        return L, C, R
