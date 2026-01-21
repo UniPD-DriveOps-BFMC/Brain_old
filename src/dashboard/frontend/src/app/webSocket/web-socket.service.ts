@@ -65,14 +65,13 @@ export class WebSocketService {
     'Calibration',
     'CalibPWMData',
     'CalibRunDone',
-    'ImuAck',
-    'console_log'
+    'ImuAck'
   ]);
 
   constructor() {
     this.webSocket = new Socket({
-      url: "http://192.168.0.110:5005",
-      options: {},
+    url: "http://192.168.0.77:5005",
+    options: {},
     });
 
     // Listen for all messages from the WebSocket server
@@ -221,10 +220,6 @@ export class WebSocketService {
 
   receiveNucleoAlive(): Observable<any> {
     return this.webSocket.fromEvent('AliveSignal');
-  }
-
-  receiveConsoleLog(): Observable<any> {
-    return this.webSocket.fromEvent('console_log');
   }
 
   // Method to receive the initial connection confirmation

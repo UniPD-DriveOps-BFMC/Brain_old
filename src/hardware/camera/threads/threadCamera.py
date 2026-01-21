@@ -31,6 +31,11 @@ import threading
 import base64
 import picamera2
 import time
+import struct
+
+## Added imports
+import cv2
+import numpy as np
 
 from src.utils.messages.allMessages import (
     mainCamera,
@@ -39,7 +44,8 @@ from src.utils.messages.allMessages import (
     Record,
     Brightness,
     Contrast,
-    ObstacleInfo,
+    SteerMotor,
+    SpeedMotor
 )
 from src.utils.messages.messageHandlerSender import messageHandlerSender
 from src.utils.messages.messageHandlerSubscriber import messageHandlerSubscriber
@@ -47,6 +53,9 @@ from src.templates.threadwithstop import ThreadWithStop
 from src.utils.messages.allMessages import StateChange
 from src.utils.messages.messageHandlerSubscriber import messageHandlerSubscriber
 from src.statemachine.systemMode import SystemMode
+
+# Added inputs
+from src.algorithms.simple_lane_follower import SimpleLaneFollower
 
 class threadCamera(ThreadWithStop):
     """Thread which will handle camera functionalities.\n
@@ -67,9 +76,16 @@ class threadCamera(ThreadWithStop):
 
         self.video_writer = ""
 
+        # init simple lane follower
+        self.lane_follower = SimpleLaneFollower()
+
         self.recordingSender = messageHandlerSender(self.queuesList, Recording)
         self.mainCameraSender = messageHandlerSender(self.queuesList, mainCamera)
         self.serialCameraSender = messageHandlerSender(self.queuesList, serialCamera)
+
+        # init senders for steering and speed
+        self.serialAngleSender = messageHandlerSender(self.queuesList, SteerMotor)
+        self.serialSpeedSender = messageHandlerSender(self.queuesList, SpeedMotor)
 
         self.subscribe()
         self._init_camera()
@@ -125,40 +141,32 @@ class threadCamera(ThreadWithStop):
             mainRequest = self.camera.capture_array("main")
             serialRequest = self.camera.capture_array("lores")  # Will capture an array that can be used by OpenCV library
 
+            # LANE KEEPING
+            # convert to BGR
+            serial_frame = cv2.cvtColor(serialRequest, cv2.COLOR_YUV2BGR_I420)
+
+            # calculate steering
+            angle = self.lane_follower.get_steering_angle(serial_frame)
+
+            # # send commands
+            # encodedAngle = base64.b64encode(angle).decode("utf-8") # type: ignore
+            # encodedSpeed = base64.b64encode(100).decode("utf-8") # type: ignore
+            # self.serialAngleSender.send(encodedAngle)
+            # self.serialSpeedSender.send(encodedSpeed)
+
+            # get bw image to display
+            bw_frame = self.lane_follower.get_image_thresh()
+
             if self.recording == True:
                 self.video_writer.write(mainRequest) # type: ignore
 
-            serialRequest = cv2.cvtColor(serialRequest, cv2.COLOR_YUV2BGR_I420) # type: ignore
-            
-            L, C, R = self.compute_obstacle(serialRequest)
+            ## DONE BEFORE
+            #serialRequest = cv2.cvtColor(serialRequest, cv2.COLOR_YUV2BGR_I420) # type: ignore
 
-            # ===== TEMP DEBUG =====
-            if self.debugger:
-                debug = serialRequest.copy()
-                h, w, _ = debug.shape
-
-                cv2.line(debug, (w // 3, 0), (w // 3, h), (0, 255, 0), 1)
-                cv2.line(debug, (2 * w // 3, 0), (2 * w // 3, h), (0, 255, 0), 1)
-
-                cv2.putText(debug, f"L:{L}", (10, 20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
-                cv2.putText(debug, f"C:{C}", (w//3 + 10, 20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
-                cv2.putText(debug, f"R:{R}", (2*w//3 + 10, 20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
-
-                cv2.imshow("Obstacle Debug", debug)
-                cv2.waitKey(1)
-            # ===== END TEMP DEBUG =====
-
-            if not self._blocker.is_set():
-                self.obstacleSender.send(
-                    ObstacleInfo(left=L, center=C, right=R)
-                )
-
-
-            _, mainEncodedImg = cv2.imencode(".jpg", mainRequest) # type: ignore
-            _, serialEncodedImg = cv2.imencode(".jpg", serialRequest) # type: ignore
+            #_, mainEncodedImg = cv2.imencode(".jpg", mainRequest) # type: ignore
+            #_, serialEncodedImg = cv2.imencode(".jpg", serialRequest) # type: ignore
+            _, mainEncodedImg = cv2.imencode(".jpg", bw_frame) # type: ignore
+            _, serialEncodedImg = cv2.imencode(".jpg", bw_frame) # type: ignore
 
             mainEncodedImageData = base64.b64encode(mainEncodedImg).decode("utf-8") # type: ignore
             serialEncodedImageData = base64.b64encode(serialEncodedImg).decode("utf-8") # type: ignore
@@ -168,8 +176,16 @@ class threadCamera(ThreadWithStop):
 
             self.mainCameraSender.send(mainEncodedImageData)
             self.serialCameraSender.send(serialEncodedImageData)
+            # send commands
+            
+            # encodedAngle = str(angle).encode("utf-8") # type: ignore
+            # encodedSpeed = str(100.0).encode("utf-8") # type: ignore
+            # encodedAngle = struct.pack("!d", int(angle*100))
+            # encodedAngle = base64.b64encode(encodedAngle).decode("utf-8")
+            self.serialAngleSender.send(f"{int(angle)}") #str(angle).encode("utf-8"))
+            self.serialSpeedSender.send("100") #str(100.0).encode("utf-8") )
         except Exception as e:
-            print(f"\033[1;97m[ Camera ] :\033[0m \033[1;91mERROR\033[0m - {e}")
+            print(f"\033[1;97m[ Camera ] :\033[0m \033[1;91mERROR\033[0m - {e} \t {str(angle).encode("utf-8")} \t  {type(encodedAngle)}")
 
     # ================================ STATE CHANGE HANDLER ========================================
     def state_change_handler(self):
@@ -242,23 +258,3 @@ class threadCamera(ThreadWithStop):
                 }
             )
         threading.Timer(1, self.configs).start()
-      # ============================= Custom ================================================  
-    def compute_obstacle(self, frame):
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
-
-        h, w = blur.shape
-        roi = blur[int(0.6 * h):h, :]   # bottom 40%
-
-        edges = cv2.Canny(roi, 50, 150)
-
-        third = w // 3
-        left   = edges[:, :third]
-        center = edges[:, third:2*third]
-        right  = edges[:, 2*third:]
-
-        L = int(left.sum())
-        C = int(center.sum())
-        R = int(right.sum())
-
-        return L, C, R

@@ -50,9 +50,7 @@ psutil.Process(os.getpid()).cpu_affinity(available_cores)
 sys.path.append(".")
 from multiprocessing import Queue, Event
 from src.utils.bigPrintMessages import BigPrint
-from src.utils.outputWriters import QueueWriter, MultiWriter
 import logging
-import logging.handlers
 
 logging.basicConfig(level=logging.INFO)
 
@@ -71,7 +69,6 @@ from src.statemachine.systemMode import SystemMode
 
 # ------ New component imports starts here ------#
 
-from src.template.obstacleAvoid.processobstacleAvoid import processobstacleAvoid
 
 # ------ New component imports ends here ------#
 
@@ -116,16 +113,8 @@ queueList = {
     "Warning": Queue(),
     "General": Queue(),
     "Config": Queue(),
-    "Log": Queue(),
 }
 logging = logging.getLogger()
-
-original_stdout = sys.stdout
-original_stderr = sys.stderr
-
-queue_writer = QueueWriter(queueList["Log"])
-sys.stdout = MultiWriter(original_stdout, queue_writer)
-sys.stderr = MultiWriter(original_stderr, queue_writer)
 
 # ===================================== INITIALIZE ==================================
 
@@ -163,10 +152,6 @@ allProcesses.extend([processCamera, processSemaphore, processTrafficCom, process
 allEvents.extend([camera_ready, semaphore_ready, traffic_com_ready, serial_handler_ready, dashboard_ready])
 
 # ------ New component initialize starts here ------#
-
-obstacleAvoid_ready = Event()
-processobstacleAvoid = processobstacleAvoid(queueList, logging, obstacleAvoid_ready, debugging = False)
-allProcesses.insert(0, processobstacleAvoid)
 
 # ------ New component initialize ends here ------#
 
