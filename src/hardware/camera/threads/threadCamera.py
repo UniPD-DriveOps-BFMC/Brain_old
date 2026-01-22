@@ -146,8 +146,8 @@ class threadCamera(ThreadWithStop):
 
             self.mainCameraSender.send(mainEncodedImageData)
             self.serialCameraSender.send(serialEncodedImageData)
-            self.speedSend.send("100")
-            self.steerSend.send("-15")
+            self.speedSend.send("150")
+            self.steerSend.send("-100")
         except Exception as e:
             print(f"\033[1;97m[ Camera ] :\033[0m \033[1;91mERROR\033[0m - {e}")
 
