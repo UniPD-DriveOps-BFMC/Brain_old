@@ -31,6 +31,7 @@ import threading
 import base64
 import picamera2
 import time
+import numpy as np
 
 from src.utils.messages.allMessages import (
     mainCamera,
@@ -135,37 +136,27 @@ class threadCamera(ThreadWithStop):
 
             serialRequest = cv2.cvtColor(serialRequest, cv2.COLOR_YUV2BGR_I420) # type: ignore
 
-            gray = cv2.cvtColor(serialRequest, cv2.COLOR_BGR2GRAY)
-            # Blur to reduce noise
-            blur = cv2.GaussianBlur(gray, (5,5), 0)
-            # Simple threshold to detect bright object (you can adjust 100)
-            _, thresh = cv2.threshold(blur, 100, 255, cv2.THRESH_BINARY)
-            # Find contours
-            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            L, C, R = self.compute_obstacle(serialRequest)
 
-            # Steering logic
-            steer_command = 0  # straight
-            obstacle_detected = False
+            threshold = 50  # tuned for np.count_nonzero scale
 
-            if contours:
-                # Find largest contour (closest obstacle)
-                largest = max(contours, key=cv2.contourArea)
-                if cv2.contourArea(largest) > 50:  # minimal size to ignore noise
-                    obstacle_detected = True
-                    # Get bounding box center
-                    x, y, w, h = cv2.boundingRect(largest)
-                    cx = x + w // 2
-                    # Map center to steering: left obstacle -> steer right, right obstacle -> steer left
-                    img_center = serialRequest.shape[1] // 2
-                    offset = cx - img_center
-                    steer_command = int(-offset / img_center * 100)  # max +/- 30 deg approx
+            # Base commands
+            speed_cmd = 100
+            steer_cmd = 0
 
-            # fallback static speed
-            speed_command = "150" if not obstacle_detected else "50"  # slow down if obstacle
+            total = L + C + R + 1  # prevent division by zero
+            # Continuous steering proportional to obstacle distribution
+            steer_cmd = int((R - L) / total * 100)  # -50 to +50 max
+
+            # Slow down if center is blocked
+            if C > threshold:
+                speed_cmd = max(50, 100 - int(C / 2))  # proportional slowdown
+            elif L > threshold or R > threshold:
+                speed_cmd = 50  # moderate slowdown if side obstacles
 
             # Send commands
-            self.speedSend.send(str(speed_command))
-            self.steerSend.send(str(steer_command))
+            self.speedSend.send(str(speed_cmd))
+            self.steerSend.send(str(steer_cmd))
 
             _, mainEncodedImg = cv2.imencode(".jpg", mainRequest) # type: ignore
             _, serialEncodedImg = cv2.imencode(".jpg", serialRequest) # type: ignore
@@ -252,3 +243,24 @@ class threadCamera(ThreadWithStop):
                 }
             )
         threading.Timer(1, self.configs).start()
+    def compute_obstacle(self, frame):
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+
+        h, w = blur.shape
+        roi = blur[int(0.6 * h):h, :]   # bottom 40%
+
+        edges = cv2.Canny(roi, 50, 150)
+
+        third = w // 3
+        left   = edges[:, :third]
+        center = edges[:, third:2*third]
+        right  = edges[:, 2*third:]
+
+        # Count actual edge pixels (0 or 255)
+        L = np.count_nonzero(left)
+        C = np.count_nonzero(center)
+        R = np.count_nonzero(right)
+
+        return L, C, R
+
