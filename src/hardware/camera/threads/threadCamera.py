@@ -135,6 +135,38 @@ class threadCamera(ThreadWithStop):
 
             serialRequest = cv2.cvtColor(serialRequest, cv2.COLOR_YUV2BGR_I420) # type: ignore
 
+            gray = cv2.cvtColor(serialRequest, cv2.COLOR_BGR2GRAY)
+            # Blur to reduce noise
+            blur = cv2.GaussianBlur(gray, (5,5), 0)
+            # Simple threshold to detect bright object (you can adjust 100)
+            _, thresh = cv2.threshold(blur, 100, 255, cv2.THRESH_BINARY)
+            # Find contours
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            # Steering logic
+            steer_command = 0  # straight
+            obstacle_detected = False
+
+            if contours:
+                # Find largest contour (closest obstacle)
+                largest = max(contours, key=cv2.contourArea)
+                if cv2.contourArea(largest) > 50:  # minimal size to ignore noise
+                    obstacle_detected = True
+                    # Get bounding box center
+                    x, y, w, h = cv2.boundingRect(largest)
+                    cx = x + w // 2
+                    # Map center to steering: left obstacle -> steer right, right obstacle -> steer left
+                    img_center = serialRequest.shape[1] // 2
+                    offset = cx - img_center
+                    steer_command = int(-offset / img_center * 30)  # max +/- 30 deg approx
+
+            # fallback static speed
+            speed_command = "100" if not obstacle_detected else "50"  # slow down if obstacle
+
+            # Send commands
+            self.speedSend.send(str(speed_command))
+            self.steerSend.send(str(steer_command))
+
             _, mainEncodedImg = cv2.imencode(".jpg", mainRequest) # type: ignore
             _, serialEncodedImg = cv2.imencode(".jpg", serialRequest) # type: ignore
 
@@ -146,8 +178,6 @@ class threadCamera(ThreadWithStop):
 
             self.mainCameraSender.send(mainEncodedImageData)
             self.serialCameraSender.send(serialEncodedImageData)
-            self.speedSend.send("100")
-            self.steerSend.send("-15")
         except Exception as e:
             print(f"\033[1;97m[ Camera ] :\033[0m \033[1;91mERROR\033[0m - {e}")
 
