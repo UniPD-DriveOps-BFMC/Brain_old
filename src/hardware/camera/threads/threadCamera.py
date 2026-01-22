@@ -138,7 +138,7 @@ class threadCamera(ThreadWithStop):
 
             L, C, R = self.compute_obstacle(serialRequest)
 
-            threshold = 50  # tuned for np.count_nonzero scale
+            threshold = 1000  # tuned for np.count_nonzero scale
 
             # Base commands
             speed_cmd = 100
@@ -244,23 +244,33 @@ class threadCamera(ThreadWithStop):
             )
         threading.Timer(1, self.configs).start()
     def compute_obstacle(self, frame):
+        
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        blur = cv2.GaussianBlur(gray, (5,5), 0)
 
         h, w = blur.shape
-        roi = blur[int(0.6 * h):h, :]   # bottom 40%
+        roi = blur[int(0.6*h):h, :]  # bottom 40%
 
-        edges = cv2.Canny(roi, 50, 150)
+        edges = cv2.Canny(roi, 150, 500)
 
+        # Find contours of edges
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        # Create masks for left, center, right
         third = w // 3
-        left   = edges[:, :third]
-        center = edges[:, third:2*third]
-        right  = edges[:, 2*third:]
-
-        # Count actual edge pixels (0 or 255)
-        L = np.count_nonzero(left)
-        C = np.count_nonzero(center)
-        R = np.count_nonzero(right)
+        L = C = R = 0
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < 50:  # ignore small noise
+                continue
+            x, y, w_box, h_box = cv2.boundingRect(cnt)
+            cx = x + w_box // 2
+            if cx < third:
+                L += area
+            elif cx < 2*third:
+                C += area
+            else:
+                R += area
 
         return L, C, R
 
