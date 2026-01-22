@@ -158,10 +158,10 @@ class threadCamera(ThreadWithStop):
                     # Map center to steering: left obstacle -> steer right, right obstacle -> steer left
                     img_center = serialRequest.shape[1] // 2
                     offset = cx - img_center
-                    steer_command = int(-offset / img_center * 30)  # max +/- 30 deg approx
+                    steer_command = int(-offset / img_center * 100)  # max +/- 30 deg approx
 
             # fallback static speed
-            speed_command = "100" if not obstacle_detected else "50"  # slow down if obstacle
+            speed_command = "150" if not obstacle_detected else "50"  # slow down if obstacle
 
             # Send commands
             self.speedSend.send(str(speed_command))
