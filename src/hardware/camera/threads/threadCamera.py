@@ -138,7 +138,7 @@ class threadCamera(ThreadWithStop):
 
             L, C, R = self.compute_obstacle(serialRequest)
 
-            threshold = 1000  # tuned for np.count_nonzero scale
+            threshold = 40  # tuned for np.count_nonzero scale
 
             # Base commands
             speed_cmd = 100
@@ -146,13 +146,11 @@ class threadCamera(ThreadWithStop):
 
             total = L + C + R + 1  # prevent division by zero
             # Continuous steering proportional to obstacle distribution
-            steer_cmd = int((R - L) / total * 100)  # -50 to +50 max
+            steer_cmd = int((L -R) / total * 100)  # -50 to +50 max
 
             # Slow down if center is blocked
-            if C > threshold:
-                speed_cmd = max(50, 100 - int(C / 2))  # proportional slowdown
-            elif L > threshold or R > threshold:
-                speed_cmd = 50  # moderate slowdown if side obstacles
+            if C > threshold or L > threshold or R > threshold :
+                speed_cmd = 30  # proportional slowdown
 
             # Send commands
             self.speedSend.send(str(speed_cmd))
@@ -261,7 +259,7 @@ class threadCamera(ThreadWithStop):
         L = C = R = 0
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            if area < 50:  # ignore small noise
+            if area < 30:  # ignore small noise
                 continue
             x, y, w_box, h_box = cv2.boundingRect(cnt)
             cx = x + w_box // 2
